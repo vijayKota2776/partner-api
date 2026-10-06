@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi import FastAPI, Depends, HTTPException, Request, APIRouter
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from typing import List, Optional
@@ -81,7 +81,6 @@ def get_db():
 
 # Dependency to validate API Key
 def get_api_key(api_key_header: str = Depends(api_key_header), db: Session = Depends(get_db)):
-    # Check if key exists in DB
     key_record = db.query(PartnerAPIKeyDB).filter(PartnerAPIKeyDB.key == api_key_header).first()
     if not key_record:
         raise HTTPException(status_code=401, detail="Invalid or missing API Key")
@@ -89,7 +88,6 @@ def get_api_key(api_key_header: str = Depends(api_key_header), db: Session = Dep
 
 @app.on_event("startup")
 def startup_event():
-    # Seed DB with initial data if empty
     db = SessionLocal()
     if not db.query(PartnerAPIKeyDB).first():
         db.add(PartnerAPIKeyDB(key="Bearer partner-api-key", partner_name="Test Partner 1"))
@@ -99,13 +97,16 @@ def startup_event():
     db.commit()
     db.close()
 
-@app.get("/api/v1/hotels/search", response_model=List[HotelResponse])
+# --- PRODUCTION API ROUTER ---
+prod_router = APIRouter(prefix="/api/v1")
+
+@prod_router.get("/hotels/search", response_model=List[HotelResponse])
 @limiter.limit("100/minute")
 def search_hotels(request: Request, destination: str, checkIn: str, checkOut: str, guests: int, rooms: int, api_key: str = Depends(get_api_key), db: Session = Depends(get_db)):
     hotels = db.query(HotelDB).filter(HotelDB.destination.ilike(destination), HotelDB.available_rooms >= rooms).all()
     return hotels
 
-@app.post("/api/v1/bookings", response_model=BookingResponse)
+@prod_router.post("/bookings", response_model=BookingResponse)
 @limiter.limit("50/minute")
 def create_booking(request: Request, booking: BookingRequest, api_key: str = Depends(get_api_key), db: Session = Depends(get_db)):
     hotel = db.query(HotelDB).filter(HotelDB.id == booking.hotel_id).first()
@@ -113,7 +114,6 @@ def create_booking(request: Request, booking: BookingRequest, api_key: str = Dep
         raise HTTPException(status_code=400, detail="Hotel not found or insufficient rooms")
     
     hotel.available_rooms -= booking.rooms
-    
     booking_id = str(uuid.uuid4())
     new_booking = BookingDB(id=booking_id, hotel_id=booking.hotel_id, rooms=booking.rooms, status="CONFIRMED")
     db.add(new_booking)
@@ -121,7 +121,7 @@ def create_booking(request: Request, booking: BookingRequest, api_key: str = Dep
     db.refresh(new_booking)
     return new_booking
 
-@app.get("/api/v1/bookings/{booking_id}", response_model=BookingResponse)
+@prod_router.get("/bookings/{booking_id}", response_model=BookingResponse)
 @limiter.limit("100/minute")
 def retrieve_booking(request: Request, booking_id: str, api_key: str = Depends(get_api_key), db: Session = Depends(get_db)):
     booking = db.query(BookingDB).filter(BookingDB.id == booking_id).first()
@@ -129,7 +129,7 @@ def retrieve_booking(request: Request, booking_id: str, api_key: str = Depends(g
         raise HTTPException(status_code=404, detail="Booking not found")
     return booking
 
-@app.post("/api/v1/bookings/{booking_id}/cancel")
+@prod_router.post("/bookings/{booking_id}/cancel")
 @limiter.limit("50/minute")
 def cancel_booking(request: Request, booking_id: str, api_key: str = Depends(get_api_key), db: Session = Depends(get_db)):
     booking = db.query(BookingDB).filter(BookingDB.id == booking_id).first()
@@ -143,3 +143,61 @@ def cancel_booking(request: Request, booking_id: str, api_key: str = Depends(get
         
     db.commit()
     return {"message": "Booking cancelled successfully", "booking_id": booking_id, "status": "CANCELLED"}
+
+
+# --- SANDBOX API ROUTER ---
+# Sandbox endpoints use in-memory data that resets on every boot and does not touch prod DB.
+sandbox_router = APIRouter(prefix="/api/sandbox/v1")
+sandbox_hotels = [
+    {"id": "test_h1", "name": "Sandbox Hotel 1", "destination": "Paris", "available_rooms": 100},
+    {"id": "test_h2", "name": "Sandbox Hotel 2", "destination": "Paris", "available_rooms": 20},
+]
+sandbox_bookings = {}
+
+@sandbox_router.get("/hotels/search", response_model=List[HotelResponse])
+@limiter.limit("100/minute")
+def sandbox_search_hotels(request: Request, destination: str, checkIn: str, checkOut: str, guests: int, rooms: int, api_key: str = Depends(get_api_key)):
+    results = [h for h in sandbox_hotels if h["destination"].lower() == destination.lower() and h["available_rooms"] >= rooms]
+    return results
+
+@sandbox_router.post("/bookings", response_model=BookingResponse)
+@limiter.limit("50/minute")
+def sandbox_create_booking(request: Request, booking: BookingRequest, api_key: str = Depends(get_api_key)):
+    hotel = next((h for h in sandbox_hotels if h["id"] == booking.hotel_id), None)
+    if not hotel or hotel["available_rooms"] < booking.rooms:
+        raise HTTPException(status_code=400, detail="Hotel not found or insufficient rooms")
+    
+    hotel["available_rooms"] -= booking.rooms
+    booking_id = "test_" + str(uuid.uuid4())
+    sandbox_bookings[booking_id] = {
+        "id": booking_id,
+        "hotel_id": booking.hotel_id,
+        "rooms": booking.rooms,
+        "status": "CONFIRMED"
+    }
+    return sandbox_bookings[booking_id]
+
+@sandbox_router.get("/bookings/{booking_id}", response_model=BookingResponse)
+@limiter.limit("100/minute")
+def sandbox_retrieve_booking(request: Request, booking_id: str, api_key: str = Depends(get_api_key)):
+    booking = sandbox_bookings.get(booking_id)
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found in Sandbox")
+    return booking
+
+@sandbox_router.post("/bookings/{booking_id}/cancel")
+@limiter.limit("50/minute")
+def sandbox_cancel_booking(request: Request, booking_id: str, api_key: str = Depends(get_api_key)):
+    booking = sandbox_bookings.get(booking_id)
+    if not booking or booking["status"] == "CANCELLED":
+        raise HTTPException(status_code=400, detail="Booking not found or already cancelled in Sandbox")
+    
+    booking["status"] = "CANCELLED"
+    hotel = next(h for h in sandbox_hotels if h["id"] == booking["hotel_id"])
+    hotel["available_rooms"] += booking["rooms"]
+    return {"message": "Sandbox booking cancelled successfully", "booking_id": booking_id, "status": "CANCELLED"}
+
+
+# Include routers
+app.include_router(prod_router)
+app.include_router(sandbox_router)
