@@ -1,0 +1,142 @@
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{microtype}
+
+\title{\textbf{PartnerAPI}\\
+UML Design Package}
+\author{Software Engineering Project}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\newpage
+
+\section{Architecture Overview}
+
+PartnerAPI separates the public partner interface from the internal booking platform.
+
+The architecture follows the principle:
+
+\begin{quote}
+``Public API clients should depend on stable public contracts rather than internal booking-system implementation details.''
+\end{quote}
+
+This separation reduces coupling between external partner integrations and internal booking-system implementation.
+
+\section{Use Case Diagram}
+
+The use case model identifies the primary interactions between partner agencies, administrators, and the PartnerAPI platform.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{../diagrams/use-case/use-case.png}
+\caption{PartnerAPI Use Case Diagram}
+\end{figure}
+
+Primary use cases:
+\begin{itemize}
+\item Authenticate
+\item Search Hotels
+\item View Availability
+\item Create Booking
+\item Retrieve Booking
+\item Cancel Booking
+\item Access Sandbox
+\item Manage API Keys
+\item View Usage Reports
+\end{itemize}
+
+\section{Class Diagram}
+
+The class diagram represents the primary domain objects.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.9\textwidth]{../diagrams/class/class.png}
+\caption{PartnerAPI Class Diagram}
+\end{figure}
+
+Key classes include:
+\begin{itemize}
+\item Partner
+\item APIKey
+\item Hotel
+\item Room
+\item Booking
+\item RateLimitPolicy
+\item UsageRecord
+\end{itemize}
+
+\section{Sequence Diagram}
+
+The sequence diagram describes the ``Search and Book a Hotel Through the API'' scenario.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{../diagrams/sequence/search-book.png}
+\caption{Search and Book Hotel Sequence}
+\end{figure}
+
+\section{Activity Diagram}
+
+The activity diagram details the partner booking workflow.
+
+\begin{figure}[h]
+\centering
+\includegraphics[height=0.7\textheight]{../diagrams/activity/activity.png}
+\caption{Partner Booking Activity}
+\end{figure}
+
+\section{Booking State Diagram}
+
+A booking progresses through controlled states during its lifecycle.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.6\textwidth]{../diagrams/state/booking-state.png}
+\caption{Booking State Diagram}
+\end{figure}
+
+\section{Cohesion}
+
+The system uses high-cohesion modules. 
+
+\begin{itemize}
+\item Authentication module handles authentication.
+\item Booking module handles booking lifecycle logic.
+\item Rate-limit module handles request limits.
+\item Reporting module handles usage data.
+\item Partner module handles partner configuration.
+\end{itemize}
+
+Each module has a focused responsibility, which ensures high cohesion.
+
+\section{Coupling}
+
+The public API is separated from the internal booking implementation.
+
+The API communicates through stable service interfaces rather than directly depending on internal database structures. 
+This allows the internal booking platform to evolve without forcing partners to change their integrations unnecessarily.
+
+\section{Design Rationale}
+
+The design aims for:
+\begin{itemize}
+\item High cohesion
+\item Low coupling
+\item Stable API contracts
+\item Clear responsibility boundaries
+\item Independent testing
+\item Controlled change
+\end{itemize}
+
+\section{Conclusion}
+
+The UML design package defines the architecture and behavior of PartnerAPI. This separation of concerns guarantees stability, performance, and clear boundaries between the internal booking system and external partner integrations.
+
+\end{document}
