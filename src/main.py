@@ -7,6 +7,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 import uuid
 import datetime
+import secrets
 
 # --- SQLAlchemy setup ---
 from sqlalchemy import create_engine, Column, String, Integer, DateTime, func
@@ -49,7 +50,7 @@ Base.metadata.create_all(bind=engine)
 # ------------------------
 
 limiter = Limiter(key_func=get_remote_address)
-app = FastAPI(title="PartnerAPI", version="1.0.0", description="Public Hotel Booking API (SQLite backed + Sandbox + Analytics)")
+app = FastAPI(title="PartnerAPI", version="1.0.0", description="Public Hotel Booking API (SQLite backed + Sandbox + Analytics + Partner Management)")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -78,6 +79,9 @@ class BookingResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class PartnerCreateRequest(BaseModel):
+    partner_name: str
+
 # Dependency to get DB session
 def get_db():
     db = SessionLocal()
@@ -97,7 +101,6 @@ def get_api_key(api_key_header: str = Depends(api_key_header), db: Session = Dep
 async def log_requests(request: Request, call_next):
     response = await call_next(request)
     api_key = request.headers.get("Authorization", "Anonymous")
-    # Log to database
     db = SessionLocal()
     usage = UsageRecordDB(
         api_key=api_key,
@@ -126,9 +129,29 @@ admin_router = APIRouter(prefix="/api/admin")
 
 @admin_router.get("/reports")
 def get_usage_reports(db: Session = Depends(get_db)):
-    # Simple report: count of requests per partner API key
     report = db.query(UsageRecordDB.api_key, func.count(UsageRecordDB.id).label("total_requests")).group_by(UsageRecordDB.api_key).all()
     return [{"api_key": r.api_key, "total_requests": r.total_requests} for r in report]
+
+@admin_router.post("/partners")
+def create_partner(partner: PartnerCreateRequest, db: Session = Depends(get_db)):
+    # Generate a secure token
+    raw_key = secrets.token_hex(16)
+    formatted_key = f"Bearer {raw_key}"
+    
+    new_partner = PartnerAPIKeyDB(key=formatted_key, partner_name=partner.partner_name)
+    db.add(new_partner)
+    db.commit()
+    return {"partner_name": partner.partner_name, "api_key": formatted_key}
+
+@admin_router.delete("/partners/{partner_name}")
+def delete_partner(partner_name: str, db: Session = Depends(get_db)):
+    partners = db.query(PartnerAPIKeyDB).filter(PartnerAPIKeyDB.partner_name == partner_name).all()
+    if not partners:
+        raise HTTPException(status_code=404, detail="Partner not found")
+    for p in partners:
+        db.delete(p)
+    db.commit()
+    return {"message": f"Partner {partner_name} and keys revoked."}
 
 
 # --- PRODUCTION API ROUTER ---
