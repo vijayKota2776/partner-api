@@ -9,7 +9,7 @@ import uuid
 import datetime
 
 # --- SQLAlchemy setup ---
-from sqlalchemy import create_engine, Column, String, Integer
+from sqlalchemy import create_engine, Column, String, Integer, DateTime, func
 from sqlalchemy.orm import sessionmaker, Session, declarative_base
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///./partner_api.db"
@@ -36,11 +36,20 @@ class PartnerAPIKeyDB(Base):
     key = Column(String, primary_key=True, index=True)
     partner_name = Column(String)
 
+class UsageRecordDB(Base):
+    __tablename__ = "usage_records"
+    id = Column(Integer, primary_key=True, index=True)
+    api_key = Column(String, index=True)
+    endpoint = Column(String)
+    method = Column(String)
+    status_code = Column(Integer)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+
 Base.metadata.create_all(bind=engine)
 # ------------------------
 
 limiter = Limiter(key_func=get_remote_address)
-app = FastAPI(title="PartnerAPI", version="1.0.0", description="Public Hotel Booking API (SQLite backed)")
+app = FastAPI(title="PartnerAPI", version="1.0.0", description="Public Hotel Booking API (SQLite backed + Sandbox + Analytics)")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -53,7 +62,6 @@ class HotelResponse(BaseModel):
     name: str
     destination: str
     available_rooms: int
-
     class Config:
         from_attributes = True
 
@@ -67,7 +75,6 @@ class BookingResponse(BaseModel):
     hotel_id: str
     rooms: int
     status: str
-
     class Config:
         from_attributes = True
 
@@ -86,6 +93,23 @@ def get_api_key(api_key_header: str = Depends(api_key_header), db: Session = Dep
         raise HTTPException(status_code=401, detail="Invalid or missing API Key")
     return api_key_header
 
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    response = await call_next(request)
+    api_key = request.headers.get("Authorization", "Anonymous")
+    # Log to database
+    db = SessionLocal()
+    usage = UsageRecordDB(
+        api_key=api_key,
+        endpoint=request.url.path,
+        method=request.method,
+        status_code=response.status_code
+    )
+    db.add(usage)
+    db.commit()
+    db.close()
+    return response
+
 @app.on_event("startup")
 def startup_event():
     db = SessionLocal()
@@ -96,6 +120,16 @@ def startup_event():
         db.add(HotelDB(id="h2", name="Cozy Inn", destination="London", available_rooms=5))
     db.commit()
     db.close()
+
+# --- ADMIN / ANALYTICS ROUTER ---
+admin_router = APIRouter(prefix="/api/admin")
+
+@admin_router.get("/reports")
+def get_usage_reports(db: Session = Depends(get_db)):
+    # Simple report: count of requests per partner API key
+    report = db.query(UsageRecordDB.api_key, func.count(UsageRecordDB.id).label("total_requests")).group_by(UsageRecordDB.api_key).all()
+    return [{"api_key": r.api_key, "total_requests": r.total_requests} for r in report]
+
 
 # --- PRODUCTION API ROUTER ---
 prod_router = APIRouter(prefix="/api/v1")
@@ -112,7 +146,6 @@ def create_booking(request: Request, booking: BookingRequest, api_key: str = Dep
     hotel = db.query(HotelDB).filter(HotelDB.id == booking.hotel_id).first()
     if not hotel or hotel.available_rooms < booking.rooms:
         raise HTTPException(status_code=400, detail="Hotel not found or insufficient rooms")
-    
     hotel.available_rooms -= booking.rooms
     booking_id = str(uuid.uuid4())
     new_booking = BookingDB(id=booking_id, hotel_id=booking.hotel_id, rooms=booking.rooms, status="CONFIRMED")
@@ -135,18 +168,15 @@ def cancel_booking(request: Request, booking_id: str, api_key: str = Depends(get
     booking = db.query(BookingDB).filter(BookingDB.id == booking_id).first()
     if not booking or booking.status == "CANCELLED":
         raise HTTPException(status_code=400, detail="Booking not found or already cancelled")
-    
     booking.status = "CANCELLED"
     hotel = db.query(HotelDB).filter(HotelDB.id == booking.hotel_id).first()
     if hotel:
         hotel.available_rooms += booking.rooms
-        
     db.commit()
     return {"message": "Booking cancelled successfully", "booking_id": booking_id, "status": "CANCELLED"}
 
 
 # --- SANDBOX API ROUTER ---
-# Sandbox endpoints use in-memory data that resets on every boot and does not touch prod DB.
 sandbox_router = APIRouter(prefix="/api/sandbox/v1")
 sandbox_hotels = [
     {"id": "test_h1", "name": "Sandbox Hotel 1", "destination": "Paris", "available_rooms": 100},
@@ -166,7 +196,6 @@ def sandbox_create_booking(request: Request, booking: BookingRequest, api_key: s
     hotel = next((h for h in sandbox_hotels if h["id"] == booking.hotel_id), None)
     if not hotel or hotel["available_rooms"] < booking.rooms:
         raise HTTPException(status_code=400, detail="Hotel not found or insufficient rooms")
-    
     hotel["available_rooms"] -= booking.rooms
     booking_id = "test_" + str(uuid.uuid4())
     sandbox_bookings[booking_id] = {
@@ -191,13 +220,12 @@ def sandbox_cancel_booking(request: Request, booking_id: str, api_key: str = Dep
     booking = sandbox_bookings.get(booking_id)
     if not booking or booking["status"] == "CANCELLED":
         raise HTTPException(status_code=400, detail="Booking not found or already cancelled in Sandbox")
-    
     booking["status"] = "CANCELLED"
     hotel = next(h for h in sandbox_hotels if h["id"] == booking["hotel_id"])
     hotel["available_rooms"] += booking["rooms"]
     return {"message": "Sandbox booking cancelled successfully", "booking_id": booking_id, "status": "CANCELLED"}
 
 
-# Include routers
+app.include_router(admin_router)
 app.include_router(prod_router)
 app.include_router(sandbox_router)
