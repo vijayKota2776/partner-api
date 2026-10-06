@@ -314,17 +314,14 @@ The standard API remains protected from uncontrolled partner-specific scope expa
 
 This repository contains the complete engineering artefacts required for the PartnerAPI project:
 
-* IEEE 830-style SRS
-* UML design package
-* Project plan
-* Estimation calculations
-* Test plan and evidence
-* Risk register
-* Change log
-* Closure and lessons learned
-* API implementation
-* Sandbox
-* Partner documentation
+* IEEE 830-style SRS (PDF)
+* UML design package (PDF & Images)
+* Project plan (PDF)
+* Estimation calculations (Excel & PDF)
+* Test plan and evidence (PDF)
+* Risk register (PDF)
+* Change log (PDF)
+* Closure and lessons learned (PDF)
 
 ---
 
@@ -332,15 +329,13 @@ This repository contains the complete engineering artefacts required for the Par
 
 | Area               | Status  |
 | ------------------ | ------- |
-| Requirements       | Planned |
-| API Design         | Planned |
-| UML                | Planned |
-| Implementation     | Planned |
-| Sandbox            | Planned |
-| Documentation      | Planned |
-| Testing            | Planned |
-| Partner Onboarding | Planned |
-| Risk Management    | Planned |
+| Requirements       | Completed |
+| API Design         | Completed |
+| UML                | Completed |
+| Estimation         | Completed |
+| Documentation      | Completed |
+| Testing            | Completed |
+| Risk Management    | Completed |
 
 ---
 
